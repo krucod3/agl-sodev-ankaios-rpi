@@ -234,6 +234,7 @@ common_data:
     # bitbake via BB_ENV_PASSTHROUGH_ADDITIONS). Empty env = the defaults here.
     - [SSTATE_DIR, "${@os.getenv('XT_SSTATE_DIR') or d.expand('${TOPDIR}/../common_data/sstate')}"]
     - [DL_DIR, "${@os.getenv('XT_DL_DIR') or d.expand('${TOPDIR}/../common_data/downloads')}"]
+    - [BB_HASHSERVE_DB_DIR, "${SSTATE_DIR}"]
     # DISTRO. With the poky combo-repo gone, meta-poky's poky.conf is added as an
     # explicit layer (common_yocto_layers) and DISTRO must be set here (the
     # poky-bundle local.conf.sample used to default it).
@@ -745,10 +746,21 @@ parameters:
           # present -- only its recipes are masked -- so there is no absent
           # collection to key on.)
           XT_DOMA_BBMASK: " meta-xt-common/meta-xt-doma/ meta-xt-rpi4/recipes-extended/xt-xen-cfg-doma/ meta-xt-rpi4/recipes-extended/xt-aaos-host-services/"
+          # Which guest gets micro-HDMI 1, the only port wired on this bench.
+          # meta-xt-rpi4's weston-init.bbappend swaps the kiosk-shell app-ids so the
+          # panel-owning guest lands on HDMI-A-1; with no DomA in the image there is
+          # nothing to swap with, and swapping anyway would park DomU on HDMI-A-2 --
+          # a connector weston creates no output for, i.e. a black screen with no
+          # error anywhere. See RPI4_PANEL_GUEST in that bbappend.
+          RPI4_PANEL_GUEST: "DomU"
     "yes":
       overrides:
         variables:
           XT_DOMA_BBMASK: ""
+          # DomA is the cockpit's primary display, so it takes the wired port; on a
+          # 4 GiB SKU DomU cannot be up at the same time anyway (see
+          # xt-xen-cfg-doma_%.bbappend for the memory budget).
+          RPI4_PANEL_GUEST: "DomA"
         components:
           domd:
             # The AAOS guest kernel/ramdisk are deployed by the DomD bitbake
@@ -1086,6 +1098,11 @@ components:
         # meta-xt-domz is in both layer sets.
         - [XT_DOMZ_CFG_INSTALL, "%{XT_DOMZ_CFG_INSTALL}"]
         - [BBMASK:append, "%{XT_DOMA_BBMASK}"]
+        # [ENABLE_ANDROID gate, second consequence] weston lives in DomD, and only
+        # micro-HDMI 1 is wired on this board, so the app-id -> output map in
+        # weston.ini depends on WHICH guests exist. Set from the ENABLE_ANDROID
+        # override above; consumed by meta-xt-rpi4's weston-init.bbappend.
+        - [RPI4_PANEL_GUEST, "%{RPI4_PANEL_GUEST}"]
       build_target: "%{XT_DOMD_IMAGE}"
       layers:
         - *COMMON_YOCTO_LAYERS

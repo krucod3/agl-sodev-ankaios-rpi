@@ -11,6 +11,8 @@
 +          "overlays/disable-bt.dtbo": "%{YOCTOS_WORK_DIR}/%{DOMD_BUILD_DIR}/tmp/deploy/images/%{MACHINE}/disable-bt.dtbo"
 +          BOARD_RAM: "4g"
 +          BOARD_RAM: "8g"
++          RPI4_PANEL_GUEST: "DomA"
++          RPI4_PANEL_GUEST: "DomU"
 +          XT_DOMA_BBMASK: " meta-xt-common/meta-xt-doma/ meta-xt-rpi5/recipes-extended/xt-xen-cfg-doma/ meta-xt-rpi5/recipes-extended/xt-aaos-host-services/"
 +        - "tmp/deploy/images/%{MACHINE}/%{SOC_FAMILY}-%{MACHINE}-mmc.dtbo"
 +        - "tmp/deploy/images/%{MACHINE}/%{SOC_FAMILY}-%{MACHINE}-pcie1.dtbo"
@@ -31,6 +33,7 @@
 +        - [AAOS_DEVICE, "%{ANDROID_DEVICE}"]
 +        - [AAOS_KERNEL_TREE, "${TOPDIR}/../../%{ANDROID_KERNEL_DIR}"]
 +        - [AAOS_SRC_TREE, "${TOPDIR}/../../%{DOMA_DIR}"]
++        - [RPI4_PANEL_GUEST, "%{RPI4_PANEL_GUEST}"]
 +        variables:
 +      default: true
 +      overrides:

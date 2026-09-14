@@ -250,6 +250,17 @@ The Yocto-built DomD host services need no equivalent: meta-raspberrypi's own
   says so in its header. It has to be regenerated before anyone tries the libxl route on
   this board — which is also where the missing interrupt-type information in
   `irqs=[...]` would bite.
+* **Only micro-HDMI 1 has ever been driven here, and only with the 1920x720 bench
+  panel.** Two things follow from that, both handled but neither reproduced on hardware
+  in the contributing environment. First, which guest gets the wired port is a build-time
+  choice: `RPI4_PANEL_GUEST` (`rpi4-sodev.yaml` sets it from `ENABLE_ANDROID` — `DomA`
+  with Android, `DomU` without) gates the `app-ids=` swap in
+  `recipes-graphics/wayland/weston-init.bbappend`, because routing the only guest in the
+  image to the disconnected HDMI-A-2 gives a black screen with nothing in any log.
+  Second, the shared `weston.ini` pins 1920x720 modelines that no ordinary monitor has;
+  `weston-select-drm-modes` (in `meta-xt-driver-domain`) drops the pin at boot for a head
+  that has an EDID and does not advertise 1920x720, which is a no-op on this bench and
+  untested on any other display. Both are described in `docs/TROUBLESHOOTING.md`.
 * **`tools/check-memory-map.py` models BCM2712 only.** The boot scripts and several
   recipes here describe invariants that such a checker would enforce mechanically;
   extending it to BCM2711 is worthwhile follow-up work and has not been done.
@@ -270,7 +281,7 @@ recipes-extended/xen/                   Xen 4.22 series + hypervisor Kconfig + B
 recipes-extended/xt-aaos-host-services/ widen COMPATIBLE_MACHINE for the AAOS host services
 recipes-extended/xt-rpi5-domain/        per-domain CPU pinning (recipe name shared with meta-xt-common)
 recipes-extended/xt-xen-cfg-{doma,domu}/ DomA size, DomU vcpu pinning
-recipes-graphics/wayland/               weston output map and the HDMI-A-1 modeline
+recipes-graphics/wayland/               weston output map (RPI4_PANEL_GUEST) and the HDMI-A-1 modeline
 recipes-guest/domd-vc4/                 DomD partial device tree (the file boot.cmd loads)
 recipes-kernel/linux/                   DT set, passthrough overlays, BCM2711 driver fragment
 ```

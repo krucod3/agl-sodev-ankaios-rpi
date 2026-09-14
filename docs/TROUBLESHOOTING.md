@@ -10,7 +10,10 @@ the log lines it was diagnosed from, so a recurrence can be recognised rather th
 re-diagnosed.
 
 If a panel is dark, start with *Late EDID on HDMI-A-2*: the guest cannot detect that
-failure and will report a healthy display while nothing reaches the screen.
+failure and will report a healthy display while nothing reaches the screen. If the display
+is an ordinary monitor rather than one of the two 1920x720 reference panels, read
+*Pinned 1920x720 on a monitor that has no such mode* and *Nothing on screen in a
+DomA-less RPi4 build* as well — both fail the same way, silently.
 
 ---
 
@@ -110,6 +113,72 @@ done. See `meta-xt-rpi4/BCM2711-DT-TRUTH.md` §4.
 🚨 `0013` must be **deleted** once upstream carries the fix — see the note at the end of
 the patch itself and the comment above its `SRC_URI` line in
 `linux-raspberrypi_6.18.bbappend`. Check it on every kernel SRCREV bump.
+
+## Pinned 1920x720 on a monitor that has no such mode
+
+The same EINVAL storm as above, from the opposite direction, and it is what you get when
+you connect anything other than the two 1920x720 reference panels:
+
+```
+atomic: couldn't commit new state: Invalid argument
+repaint-flush failed: No such file or directory
+```
+
+`weston.ini` pins an explicit modeline on both outputs — 1920x720, because that is what
+both bench panels are. An ordinary desktop monitor does not have a 1920x720 mode, so the
+commit is rejected, weston never presents a frame, and the CRTC keeps scanning out
+fbcon — the screen shows the DomD text console (or stays dark), while the guest reports
+a perfectly healthy display. Confirm with `/sys/kernel/debug/dri/*/state`: `allocated by
+= [fbcon]` while weston is running means weston never got the plane.
+
+This is handled at boot rather than at build time. `96-wait-drm-modes.conf` runs a second
+`ExecStartPre`, `/usr/libexec/weston-select-drm-modes`, after the mode lists have settled.
+For each output that carries a pinned modeline it drops the pin — rewriting it to
+`mode=preferred` and stashing the original as a `#mode-pinned=` comment on the line above
+— only when **both** of these hold:
+
+1. the connector has a non-empty EDID, and
+2. its `/sys/class/drm/card*-<head>/modes` does not list the pinned resolution.
+
+Condition 1 keeps the pin where the pin is the only source of truth (RPi5 HDMI-A-1 has no
+EDID at all; `preferred` there would pick 1024x768). Condition 2 keeps it where EDID and
+the pin agree, which is both remaining bench heads — RPi5 HDMI-A-2's preferred DTD *is*
+the pinned 93.24 MHz line, and so is RPi4 HDMI-A-1's. So on the verified benches the
+helper changes nothing, by construction.
+
+The decision is recomputed every boot from what is actually plugged in, so swapping a
+generic monitor for a bench panel restores the pin byte-for-byte and swapping back drops
+it again; nothing accumulates. To see what it decided:
+
+```
+journalctl -u weston | grep weston-select-drm-modes
+grep -B1 '^mode=' /etc/xdg/weston/weston.ini
+```
+
+Hand-editing the installed `/etc/xdg/weston/weston.ini` still overrides it: the helper
+only ever rewrites a `mode=` line it recognises as one of those modelines, so
+`mode=1920x1080` or a `mode=preferred` you wrote yourself is left alone.
+
+## Nothing on screen in a DomA-less RPi4 build
+
+Only micro-HDMI 1 is wired on the RPi4 bench, and weston creates **no output at all** for
+a disconnected connector, so kiosk-shell has nowhere to put the surface of a guest routed
+to HDMI-A-2 — no error is logged anywhere, on either side.
+
+`meta-xt-rpi4`'s `weston-init.bbappend` swaps the two `app-ids=` lists so the guest that
+owns the panel lands on HDMI-A-1. Which guest that is depends on the build, so the swap is
+gated on `RPI4_PANEL_GUEST`, set from the `ENABLE_ANDROID` override in `rpi4-sodev.yaml`:
+`DomA` with Android, `DomU` (the shipped layout, no swap) without. If you see an empty
+screen with a healthy-looking guest, check the map in the built image:
+
+```
+grep -E '^(name|app-ids)=' /etc/xdg/weston/weston.ini
+cat /sys/class/drm/card*-HDMI-A-*/status
+```
+
+The guest you booted must be listed under the `name=` of a `connected` head. Touch follows
+the *port*, not the guest (`WL_OUTPUT=HDMI-A-1` in
+`recipes-extended/rp1-touch-forward/`), so it is correct under either setting.
 
 ## DomD-side toolstack units are masked in the thin-Linux flavour
 

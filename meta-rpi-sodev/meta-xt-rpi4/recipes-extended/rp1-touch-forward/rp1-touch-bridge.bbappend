@@ -8,8 +8,12 @@
 # panel attached -- /sys/class/drm reads
 #     card0-HDMI-A-1: connected 1920x720
 #     card0-HDMI-A-2: disconnected
-# -- so DomA was moved to HDMI-A-1 in weston.ini (see the note in that file). The touch
-# routing has to follow, and it is NOT enough to leave it pointing at a dead output:
+# -- so whichever guest owns the panel is put on HDMI-A-1 in weston.ini (DomU by default;
+# DomA when ENABLE_ANDROID=yes moves it there -- see RPI4_PANEL_GUEST in
+# meta-xt-rpi4/recipes-graphics/wayland/weston-init.bbappend). WL_OUTPUT names the OUTPUT,
+# not the guest, so HDMI-A-1 is right under either setting and this bbappend needs no gate
+# of its own. The touch routing has to follow the panel, and it is NOT enough to leave it
+# pointing at a dead output:
 # weston does not fall back to the primary output when WL_OUTPUT names one that does not
 # exist. weston-15.0.0 libweston/libinput-seat.c:128-138
 #
@@ -74,7 +78,7 @@ ${RPI4_TOUCH_OUTPUT_TO} ($n_to rule(s))"
         bbfatal "rp1-touch-bridge.bbappend (rpi4): no 'ENV{WL_OUTPUT}=' assignment for \
 ${RPI4_TOUCH_OUTPUT_FROM} in $rules. Upstream changed the touch routing -- re-derive the \
 output map from /sys/class/drm on the board (which connector is actually attached) and \
-from weston.ini (which output carries DomA) before touching this."
+from weston.ini (which output carries the panel-owning guest) before touching this."
     fi
 
     sed -i "s|$from|$to|g" "$rules"

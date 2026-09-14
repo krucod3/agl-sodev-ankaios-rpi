@@ -122,27 +122,55 @@ do_install[vardeps] += "RPI4_HDMI1_CVT_MODE RPI4_HDMI1_PANEL_MODE"
 #
 # Swapping the two app-ids lists (rather than adding DomA to HDMI-A-1) keeps every app-id
 # on exactly ONE output; listing DomA on both would leave kiosk-shell's choice ambiguous.
-# DomU ends up on the dead output, which is acceptable on this board: a 4 GiB SKU cannot
-# host DomA and DomU at the same time anyway (see xt-xen-cfg-doma_%.bbappend for the
-# memory budget).
+# DomU ends up on the dead output, which is acceptable WHEN DomA IS IN THE IMAGE: a 4 GiB
+# SKU cannot host DomA and DomU at the same time anyway (see xt-xen-cfg-doma_%.bbappend
+# for the memory budget).
+#
+# WHICH IS WHY THE SWAP IS GATED. ENABLE_ANDROID defaults to "no", and in a DomA-less
+# build the swap has nothing to swap with: it parks the only guest there is on HDMI-A-2,
+# weston creates no output for a disconnected connector, kiosk-shell has nowhere to put
+# DomU's surface, and the result is a black panel with no error in any log -- the same
+# invisible failure this postfunc exists to fix, just pointed at the other guest.
+# RPI4_PANEL_GUEST names the guest that should own the wired port; rpi4-sodev.yaml sets
+# it from the ENABLE_ANDROID override ("DomA" with Android, "DomU" without), and "DomU"
+# is the default here so a bare bitbake of the DomD image matches the default config.
 #
 # THIS MUST STAY IN STEP WITH the touch routing in
 # meta-xt-rpi4/recipes-extended/rp1-touch-forward/rp1-touch-bridge.bbappend, which points
-# WL_OUTPUT at the same output. weston drops every touch event whose device has no output
-# (libweston/libinput-device.c:460), and it does NOT fall back to the primary output when
-# WL_OUTPUT names a disconnected one (libinput-seat.c:128-138), so a mismatch between the
-# two files is silent: the picture appears and touch does nothing.
+# WL_OUTPUT at HDMI-A-1 -- the wired port -- and so follows the panel rather than the
+# guest: it stays correct under either value of RPI4_PANEL_GUEST. weston drops every touch
+# event whose device has no output (libweston/libinput-device.c:460), and it does NOT fall
+# back to the primary output when WL_OUTPUT names a disconnected one
+# (libinput-seat.c:128-138), so a mismatch between the two files is silent: the picture
+# appears and touch does nothing.
 RPI4_DOMU_APPIDS ?= "app-ids=qemu-system-aarch64-domu,DomU"
 RPI4_DOMA_APPIDS ?= "app-ids=qemu-system-aarch64-doma,DomA"
+RPI4_PANEL_GUEST ?= "DomU"
 
 do_install[postfuncs] += "rpi4_doma_output_swap"
-do_install[vardeps] += "RPI4_DOMU_APPIDS RPI4_DOMA_APPIDS"
+do_install[vardeps] += "RPI4_DOMU_APPIDS RPI4_DOMA_APPIDS RPI4_PANEL_GUEST"
 
 rpi4_doma_output_swap:raspberrypi4-64() {
     ini="${D}${sysconfdir}/xdg/weston/weston.ini"
     if [ ! -f "$ini" ]; then
         bbfatal "weston-init.bbappend (rpi4): $ini not installed"
     fi
+
+    case "${RPI4_PANEL_GUEST}" in
+    DomU)
+        # Shipped layout already puts DomU on HDMI-A-1. Nothing to do -- and doing
+        # the swap here is precisely the black-screen bug described above.
+        bbnote "weston-init.bbappend (rpi4): RPI4_PANEL_GUEST=DomU; keeping the \
+reference layout (DomU -> HDMI-A-1, the wired micro-HDMI)"
+        return
+        ;;
+    DomA)
+        ;;
+    *)
+        bbfatal "weston-init.bbappend (rpi4): RPI4_PANEL_GUEST='${RPI4_PANEL_GUEST}' \
+is not a guest this board can put on micro-HDMI 1. Expected DomU or DomA."
+        ;;
+    esac
 
     # Which output currently carries DomA? Read it rather than assume, so an upstream
     # change of the reference layout is caught instead of silently swapped back.

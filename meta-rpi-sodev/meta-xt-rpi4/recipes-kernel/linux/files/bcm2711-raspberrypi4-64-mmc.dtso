@@ -14,10 +14,9 @@
  * two supply regulators driven by the firmware GPIO (expgpio) instead of a
  * brcmstb GPIO bank.
  *
- * The controller goes under &emmc2_bus, whose dma-ranges carry the 0xc0000000
- * VideoCore bus alias bounded to DomD's low static-mem bank: on BCM2711 the SD
- * controller has the same low-1 GiB DMA limit as the mailbox and the display
- * fetch, which is why all three have to live in the same domain.
+ * The controller goes under &emmc2_bus, whose dma-ranges are identity-mapped
+ * over usable memory, matching the firmware-fixed live DT. Unlike /soc, emmc2
+ * is not behind the low-1 GiB VideoCore alias.
  */
 
 /dts-v1/;

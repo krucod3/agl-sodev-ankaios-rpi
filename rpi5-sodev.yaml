@@ -191,6 +191,7 @@ common_data:
     # bitbake via BB_ENV_PASSTHROUGH_ADDITIONS). Empty env = the defaults here.
     - [SSTATE_DIR, "${@os.getenv('XT_SSTATE_DIR') or d.expand('${TOPDIR}/../common_data/sstate')}"]
     - [DL_DIR, "${@os.getenv('XT_DL_DIR') or d.expand('${TOPDIR}/../common_data/downloads')}"]
+    - [BB_HASHSERVE_DB_DIR, "${SSTATE_DIR}"]
     # DISTRO. With the poky combo-repo gone, meta-poky's poky.conf is added as an
     # explicit layer (common_yocto_layers) and DISTRO must be set here (the
     # poky-bundle local.conf.sample used to default it).

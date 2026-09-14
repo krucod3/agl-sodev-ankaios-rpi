@@ -41,6 +41,12 @@ SRC_URI += "file://95-v3d-env.conf"
 # the header of weston-wait-drm-modes.sh.
 SRC_URI += "file://96-wait-drm-modes.conf"
 SRC_URI += "file://weston-wait-drm-modes.sh"
+# Second ExecStartPre of the same drop-in: drop weston.ini's pinned modeline on a
+# head that has an EDID and does not advertise the pinned resolution -- i.e. any
+# monitor other than the two 1920x720 reference panels. Without it, running this
+# image on ordinary hardware needs the DomD rootfs mounted on another machine and
+# weston.ini hand-edited before first boot.
+SRC_URI += "file://weston-select-drm-modes.sh"
 
 
 do_install:append() {
@@ -63,6 +69,8 @@ do_install:append() {
     install -d ${D}${libexecdir}
     install -m 0755 ${UNPACKDIR}/weston-wait-drm-modes.sh \
         ${D}${libexecdir}/weston-wait-drm-modes
+    install -m 0755 ${UNPACKDIR}/weston-select-drm-modes.sh \
+        ${D}${libexecdir}/weston-select-drm-modes
 }
 
 # weston.ini itself is already in poky's FILES:${PN}; only the drop-ins are new.
@@ -72,4 +80,5 @@ FILES:${PN} += " \
     ${systemd_system_unitdir}/weston.service.d/95-v3d-env.conf \
     ${systemd_system_unitdir}/weston.service.d/96-wait-drm-modes.conf \
     ${libexecdir}/weston-wait-drm-modes \
+    ${libexecdir}/weston-select-drm-modes \
 "

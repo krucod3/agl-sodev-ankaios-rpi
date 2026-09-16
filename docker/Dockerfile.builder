@@ -190,10 +190,6 @@ RUN cd /opt \
     && tar xf toolchain_gnu_linux-x86_64_aarch64-zephyr-elf.tar.xz -C gnu \
     && rm toolchain_gnu_linux-x86_64_aarch64-zephyr-elf.tar.xz \
     && test -d gnu/aarch64-zephyr-elf
-# setup.sh -c writes the CMake package registry into $HOME/.cmake/packages, and $HOME
-# is /root at this point while the build runs as `builder` - so it would not be read.
-# It is not needed: ZEPHYR_SDK_INSTALL_DIR above is what FindHostTools.cmake uses,
-# confirmed by CMakeCache.txt pointing at gnu/aarch64-zephyr-elf/bin/.
 ENV ZEPHYR_SDK_INSTALL_DIR=/opt/zephyr-sdk-${ZSDK}
 
 # Non-root builder aligned with host UID/GID (bitbake refuses to run as root, and
@@ -208,6 +204,7 @@ RUN groupadd --gid ${USER_GID} builder \
 
 USER builder
 WORKDIR /home/builder/workspace
+RUN ${ZEPHYR_SDK_INSTALL_DIR}/setup.sh -c
 RUN git config --global user.email "builder@sodev-builder.invalid" \
     && git config --global user.name "SoDeV Builder" \
     && git config --global color.ui auto

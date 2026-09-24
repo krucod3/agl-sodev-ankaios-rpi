@@ -84,9 +84,21 @@ independently of Xen's remaining host memory.
 ## Display policy for the PoC
 
 The PoC uses a build-time static assignment: DomK maps to HDMI-A-1 and DomU maps
-to HDMI-A-2 when enabled. A display connected only to HDMI-A-1 therefore shows
-DomK while DomU continues headless. It does not need a runtime HDMI switch or a
-DomA failure detector because DomA is not part of this configuration.
+to HDMI-A-2 when enabled. This assignment is reliable when both outputs exist
+before the QEMU surfaces are created. It is not strict output reservation:
+Weston 13 kiosk-shell falls back to the focused or default output when an
+application's configured output does not exist. With only one display connected,
+both guests can therefore land on that output, and the guest activated last can
+replace the other fullscreen surface. Moving one cable between HDMI ports can
+consequently show the DomU cluster on either port; this is fallback placement,
+not DRM clone mode. For the initial single-display PoC, build DomK without DomU
+so HDMI-A-1 consistently shows DomK.
+
+**TODO:** Add strict kiosk-shell output reservation for configured app IDs. A
+surface whose assigned connector is absent must remain hidden instead of falling
+back to another output, and it must be assigned when its connector later appears.
+Cover initial single-output startup and connector hotplug without disrupting a
+surface already displayed on the other output.
 
 The current RPi4 mechanism, `RPI4_PANEL_GUEST`, is also static: the image build
 rewrites kiosk-shell's `app-ids` mapping so either DomU or DomA owns HDMI-A-1.
@@ -185,6 +197,8 @@ RPi4:
 - Ankaios server and agent become healthy after boot.
 - `ank` in DomD can query and deploy a bounded workload to DomK.
 - A containerized Wayland test application is visible fullscreen on HDMI-A-1.
+- Applying the version-2 manifest replaces the running graphical workload, and
+   applying version 1 rolls it back without restarting DomK.
 - Keyboard and tablet events reach that application.
 - Repeated workload start/stop cycles do not leak enough DomD or DomK memory to
   threaten the next deployment.
@@ -192,26 +206,55 @@ RPi4:
 Physical audio output, runtime display switching, DomA coexistence and RPi5
 support are explicitly not PoC acceptance requirements.
 
-## Stage 1: Weston simple-EGL workload
+## Ankaios application update demonstration
 
-The first graphical workload uses Podman through Ankaios and renders with Mesa
-software EGL. Build its ARM64 image once in DomK:
+DomK contains two prebuilt ARM64 OCI images. They deliberately use small Weston
+examples so the first test isolates workload lifecycle and Wayland integration:
+
+- `weston_demo_v1.yaml` runs `weston-simple-egl` with Mesa software EGL;
+- `weston_shm.yaml` starts a separate `weston-simple-shm` workload; and
+- `weston_demo_v2.yaml` updates `weston_demo` to `weston-simple-shm`.
+
+Both images are loaded into Podman before the Ankaios agent starts. The
+`weston_demo` EGL workload is the boot-time desired state. From DomD, inspect
+it, start the independent SHM workload, and then remove that workload:
 
 ```sh
-podman build -t localhost/domk-weston-simple-egl:1.0 \
-   /usr/share/ankaios/demos/weston-simple-egl
-```
-
-Then deploy it from DomD:
-
-```sh
-ank apply -f /etc/ankaios/workloads/weston-simple-egl.yaml
+ank get workloads
+ank apply -f /etc/ankaios/workloads/weston_shm.yaml
+ank get workloads
+ank delete workload weston_shm
 ank get workloads
 ```
 
-The workload runs as the DomK Weston UID (`200`), bind-mounts
-`/run/user/200`, and connects to `wayland-0`. `LIBGL_ALWAYS_SOFTWARE=1` keeps
-this stage focused on container-to-Wayland plumbing. The container's SELinux
-label isolation is disabled for this PoC so it can access the compositor
-socket; this is not a production security policy. DomK's QEMU surface is mapped
-to HDMI-A-1 by DomD Weston.
+Applying `weston_shm.yaml` does not modify `weston_demo`, because the manifests
+use different workload names. Update the original workload from EGL to SHM,
+then roll it back through the same desired-state mechanism:
+
+```sh
+ank apply -f /etc/ankaios/workloads/weston_demo_v2.yaml
+ank apply -f /etc/ankaios/workloads/weston_demo_v1.yaml
+```
+
+The workloads run as the DomK Weston UID (`200`), bind-mount
+`/run/user/200`, and connect to `wayland-0`. `LIBGL_ALWAYS_SOFTWARE=1` keeps
+the EGL version focused on container-to-Wayland plumbing. Container SELinux
+label isolation is disabled for this PoC so the workloads can access the
+compositor socket; this is not a production security policy. DomK's QEMU
+surface is mapped to HDMI-A-1 by DomD Weston.
+
+## Moving the DomU cluster into the workload
+
+The same architecture can host the existing DomU Flutter instrument cluster,
+but the current PoC does not yet package that application as an OCI image. That
+image needs `flutter-auto`, `flutter-cluster-dashboard`, its configuration and
+fonts, with `/usr/bin/flutter-auto` as the entry point. Its KUKSA.val and CAN
+data endpoints must be reachable from DomK's network namespace; using
+`--network=host` preserves the first PoC's simple network model.
+
+Once that image is available, it can replace version 1 in
+`weston_demo_v1.yaml`; the version-2 manifest and update procedure remain
+unchanged. DomU is then unnecessary for the single-display Ankaios profile and
+can be omitted, recovering its 1024 MiB allocation. Keep a DomU + DomK build
+only while comparing the VM-hosted and container-hosted applications on the two
+HDMI outputs.

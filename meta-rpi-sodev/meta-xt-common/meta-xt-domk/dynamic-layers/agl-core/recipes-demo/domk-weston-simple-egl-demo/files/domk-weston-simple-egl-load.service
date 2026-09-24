@@ -1,0 +1,12 @@
+[Unit]
+Description=Load the DomK Weston simple-EGL container image
+After=local-fs.target
+Before=ank-agent.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/domk-weston-simple-egl-load
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

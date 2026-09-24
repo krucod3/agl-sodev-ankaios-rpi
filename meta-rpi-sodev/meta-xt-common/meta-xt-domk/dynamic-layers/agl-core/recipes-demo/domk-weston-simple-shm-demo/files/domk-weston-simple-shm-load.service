@@ -1,0 +1,12 @@
+[Unit]
+Description=Load the updated DomK Weston simple-SHM container image
+After=local-fs.target
+Before=ank-agent.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/domk-weston-simple-shm-load
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,21 @@
+#!/bin/sh
+set -eu
+
+archive=/usr/share/ankaios/images/domk-weston-simple-egl.oci.tar
+target=localhost/domk-weston-simple-egl:1.0
+
+if podman image exists "$target"; then
+    exit 0
+fi
+
+output=$(podman load --input "$archive")
+printf '%s\n' "$output"
+loaded=$(printf '%s\n' "$output" | sed -n 's/^Loaded image: //p' | tail -n 1)
+
+if [ -z "$loaded" ]; then
+    echo "Could not determine the image reference loaded from $archive" >&2
+    exit 1
+fi
+
+podman tag "$loaded" "$target"
+podman image exists "$target"

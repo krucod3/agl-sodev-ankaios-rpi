@@ -1,0 +1,15 @@
+apiVersion: v1
+workloads:
+  weston_demo:
+    runtime: podman
+    agent: domk
+    restartPolicy: ALWAYS
+    runtimeConfig: |
+      image: localhost/domk-weston-simple-shm:2.0
+      commandOptions:
+        - "--network=host"
+        - "--user=200:200"
+        - "--volume=/run/wayland-0:/run/wayland-0"
+        - "--env=XDG_RUNTIME_DIR=/run"
+        - "--env=WAYLAND_DISPLAY=wayland-0"
+        - "--security-opt=label=disable"

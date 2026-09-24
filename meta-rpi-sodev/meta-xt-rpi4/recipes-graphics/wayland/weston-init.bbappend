@@ -145,10 +145,11 @@ do_install[vardeps] += "RPI4_HDMI1_CVT_MODE RPI4_HDMI1_PANEL_MODE"
 # appears and touch does nothing.
 RPI4_DOMU_APPIDS ?= "app-ids=qemu-system-aarch64-domu,DomU"
 RPI4_DOMA_APPIDS ?= "app-ids=qemu-system-aarch64-doma,DomA"
+RPI4_DOMK_APPIDS ?= "app-ids=qemu-system-aarch64-domk,DomK"
 RPI4_PANEL_GUEST ?= "DomU"
 
 do_install[postfuncs] += "rpi4_doma_output_swap"
-do_install[vardeps] += "RPI4_DOMU_APPIDS RPI4_DOMA_APPIDS RPI4_PANEL_GUEST"
+do_install[vardeps] += "RPI4_DOMU_APPIDS RPI4_DOMA_APPIDS RPI4_DOMK_APPIDS RPI4_PANEL_GUEST"
 
 rpi4_doma_output_swap:raspberrypi4-64() {
     ini="${D}${sysconfdir}/xdg/weston/weston.ini"
@@ -166,9 +167,29 @@ reference layout (DomU -> HDMI-A-1, the wired micro-HDMI)"
         ;;
     DomA)
         ;;
+    DomK)
+        for l in '${RPI4_DOMU_APPIDS}' '${RPI4_DOMA_APPIDS}'; do
+            n=$(grep -cxF "$l" "$ini")
+            if [ "$n" != "1" ]; then
+                bbfatal "weston-init.bbappend (rpi4): expected exactly one '$l' in $ini, found $n"
+            fi
+        done
+        if grep -qF '${RPI4_DOMK_APPIDS}' "$ini"; then
+            bbfatal "weston-init.bbappend (rpi4): DomK app-ids already present in $ini before assignment"
+        fi
+        sed -i -e "s|^${RPI4_DOMU_APPIDS}\$|${RPI4_DOMK_APPIDS}|" \
+               -e "s|^${RPI4_DOMA_APPIDS}\$|${RPI4_DOMU_APPIDS}|" "$ini"
+        domk_out=$(awk -F= '/^name=/{o=$2} /^app-ids=.*DomK/{print o; exit}' "$ini")
+        domu_out=$(awk -F= '/^name=/{o=$2} /^app-ids=.*DomU/{print o; exit}' "$ini")
+        if [ "$domk_out" != "HDMI-A-1" ] || [ "$domu_out" != "HDMI-A-2" ]; then
+            bbfatal "weston-init.bbappend (rpi4): DomK landed on '$domk_out' and DomU on '$domu_out', expected HDMI-A-1 / HDMI-A-2"
+        fi
+        bbnote "weston-init.bbappend (rpi4): DomK -> HDMI-A-1, DomU -> HDMI-A-2"
+        return
+        ;;
     *)
         bbfatal "weston-init.bbappend (rpi4): RPI4_PANEL_GUEST='${RPI4_PANEL_GUEST}' \
-is not a guest this board can put on micro-HDMI 1. Expected DomU or DomA."
+is not a guest this board can put on micro-HDMI 1. Expected DomU, DomA or DomK."
         ;;
     esac
 

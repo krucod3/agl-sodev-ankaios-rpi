@@ -31,6 +31,7 @@ BOARD_RAM="${BOARD_RAM:-}"                         # --ram=<sku> : board SKU. rp
 ENABLE_DOMU="${ENABLE_DOMU:-no}"                   # -u/--domu    : add DomU (AGL cluster: p1 kernel + p3 rootfs)
 ENABLE_ANDROID="${ENABLE_ANDROID:-no}"             # -a/--android : add DomA (AAOS p4 nested GPT; heavy)
 ENABLE_DOMZ="${ENABLE_DOMZ:-no}"                   # -z/--domz    : add DomZ (Zephyr guest / RTOS domain: p1 zephyr-domz.bin)
+ENABLE_ANKAIOS="${ENABLE_ANKAIOS:-no}"             # -k/--ankaios : add DomK (RPi4 4 GiB PoC)
 NINJA_TARGET="${NINJA_TARGET-image-full}"          # --domains-only => "" (build domains, skip SD assembly)
 AAOS_SRC_DIR="${AAOS_SRC_DIR:-}"                    # --aaos-src=<dir>       (reuse an AOSP checkout, source mode)
 AAOS_MODE="${AAOS_MODE:-}"                          # --aaos=off|auto|source|prebuilt (empty: derived from -a — off, or auto when -a given)
@@ -58,7 +59,11 @@ PROXY="${HTTPS_PROXY:-}"                            # --proxy=<url>
 # here would freeze the rpi5 yaml before --board is read.
 MOULIN_YAML=""
 AGL_IMAGE="${AGL_IMAGE:-agl-cluster-demo-flutter-guest}"
+DOMK_AGL_IMAGE="${DOMK_AGL_IMAGE:-agl-image-domk}"
 AGL_MACHINE="${AGL_MACHINE:-virtio-aarch64}"
+META_ANKAIOS_URL="https://github.com/eclipse-ankaios/meta-ankaios.git"
+META_ANKAIOS_BRANCH="update_scarthgap"
+META_ANKAIOS_REV="cfb5e3062aa745699c1cd28ae9fafa9fda35e6d8"
 # Image tags. The V4H workspace (sodev-demo-workspace) builds its own image under the
 # plain "sodev-builder" tag; this one is a different Dockerfile (Zephyr SDK, python
 # venv, AOSP 17 toolchain), so it gets its own tag -- sharing the name would make
@@ -89,6 +94,9 @@ Domain options:
   -u, --domu             Build DomU (AGL instrument cluster: p1 kernel + p3 AGL rootfs)
   -a, --android          Include DomA (AAOS, p4 nested GPT). Alias for --aaos=auto
                          (how DomA is produced is chosen by --aaos).
+  -k, --ankaios          Build the DomK Ankaios PoC. Currently restricted to
+                         --board=rpi4 --ram=4g and cannot be combined with DomA.
+                         DomK owns HDMI-A-1; with -u, DomU uses HDMI-A-2.
   -z, --domz             Build DomZ (Zephyr as an unprivileged DomU: the RTOS
                          domain). 16 MiB / 1 vCPU, no rootfs -- the image is
                          staged on p1 as zephyr-domz.bin and started by the xl
@@ -223,6 +231,7 @@ while [ $# -gt 0 ]; do
   case "$1" in
     -u|--domu)          ENABLE_DOMU=yes ;;
     -a|--android)       ENABLE_ANDROID=yes; ANDROID_FLAG=yes ;;   # "want DomA"; required-ness is derived below
+    -k|--ankaios)       ENABLE_ANKAIOS=yes ;;
     --board)            needval $# "$1"; BOARD="$2"; shift ;;
     --board=*)          BOARD="${1#*=}" ;;
     -z|--domz)          ENABLE_DOMZ=yes ;;
@@ -280,6 +289,8 @@ case "$ENABLE_DOMU" in no|yes) ;; *) echo "ERROR: ENABLE_DOMU must be 'no' or 'y
 # variants are exactly "yes"/"no", so a stray value would pass through and then
 # silently mean "no".
 case "$ENABLE_DOMZ" in no|yes) ;; *) echo "ERROR: ENABLE_DOMZ must be 'no' or 'yes' (got '$ENABLE_DOMZ'); use -z/--domz" >&2; exit 1 ;; esac
+# DomK uses the same exact-value moulin gate as the other optional guests.
+case "$ENABLE_ANKAIOS" in no|yes) ;; *) echo "ERROR: ENABLE_ANKAIOS must be 'no' or 'yes' (got '$ENABLE_ANKAIOS'); use -k/--ankaios" >&2; exit 1 ;; esac
 # --- Board selection (which product yaml) --------------------------------------
 # One yaml per board, named <board>-sodev.yaml. They are siblings, not variants of one
 # file: the SoC, the machine, the Zephyr Dom0 board, the passthrough set and the whole
@@ -410,6 +421,28 @@ fi
 # ENABLE_ANDROID is derived from the resolved mode (drives moulin + yaml DomA gating).
 if [ "$AAOS_MODE" = off ]; then ENABLE_ANDROID=no; else ENABLE_ANDROID=yes; fi
 echo ">> AAOS mode: $AAOS_MODE  (ENABLE_ANDROID=$ENABLE_ANDROID)"
+
+# --- DomK proof-of-concept envelope --------------------------------------------
+# The DomK PoC supports RPi4 4 GiB with DomK alone or alongside DomU. Keep this
+# after AAOS mode resolution so --aaos=auto/source/prebuilt cannot evade the
+# DomA exclusion.
+if [ "$ENABLE_ANKAIOS" = yes ]; then
+  if [ "$BOARD" != rpi4 ] || [ "$BOARD_RAM" != 4g ]; then
+    echo "ERROR: the DomK Ankaios PoC requires --board=rpi4 --ram=4g." >&2
+    echo "       RPi4 8 GiB and RPi5 support are deferred until the PoC is measured." >&2
+    exit 1
+  fi
+  if [ "$DOM0_OS" != zephyr ]; then
+    echo "ERROR: the DomK Ankaios PoC currently requires --dom0=zephyr." >&2
+    echo "       Linux-Dom0 disk attachment and toolstack placement are not implemented." >&2
+    exit 1
+  fi
+  if [ "$ENABLE_ANDROID" = yes ]; then
+    echo "ERROR: the DomK Ankaios PoC cannot be combined with DomA." >&2
+    echo "       Drop -a/--android/--aaos; DomU is supported alongside DomK." >&2
+    exit 1
+  fi
+fi
 
 # --- 8 GB SKU: report the memory budget ---------------------------------------
 # Informational, not a warning: with dom0_mem=512M the four domains DO fit an 8 GB
@@ -1520,12 +1553,9 @@ PYEOF
   seed_repo doma_kernel "$workdir/$AAOS_KERNEL_DIR_NAME" "$XT_AAOS_KERNEL_REF"
 fi
 
-# 1) DomU (AGL Flutter) — same procedure as upstream sodev-demo-workspace/build.sh.
-#    AGL branch comes from the V4H submodule so it follows upstream.
-#    Gated on -u/--domu (ENABLE_DOMU): the AGL bitbake produces the SD image p3
-#    (AGL cluster rootfs); the moulin domu component produces the p1 Xen-aware DomU
-#    kernel (linux-virtio-armv8). Omitting -u skips both (DomU-less SD).
-if [ "${ENABLE_DOMU}" = "yes" ]; then
+# 1) AGL guest rootfs. DomU and the DomK PoC are mutually exclusive; both reuse
+#    the pinned AGL branch and shared cache, but select different image recipes.
+if [ "${ENABLE_DOMU}" = "yes" ] || [ "${ENABLE_ANKAIOS}" = "yes" ]; then
   AGL_BRANCH="$(meta-rpi-sodev/scripts/sync-guest-pins.sh --print agl-branch)"
   # Reuse the shared Yocto DL_DIR/SSTATE_DIR (the same cache the moulin/sodev-builder-rpi
   # build uses) for the AGL bitbake, so it dedupes source downloads and reuses
@@ -1537,7 +1567,17 @@ if [ "${ENABLE_DOMU}" = "yes" ]; then
   AGL_DL_DIR="${XT_DL_DIR:-$workdir/yocto/common_data/downloads}"
   AGL_SSTATE_DIR="${XT_SSTATE_DIR:-$workdir/yocto/common_data/sstate}"
   mkdir -p "$AGL_DL_DIR" "$AGL_SSTATE_DIR"
-  echo ">> DomU(AGL) in ${AGL_DOCKER}: branch=${AGL_BRANCH} image=${AGL_IMAGE}"
+  if [ "${ENABLE_ANKAIOS}" = "yes" ] && [ "${ENABLE_DOMU}" = "yes" ]; then
+    AGL_TARGET="${AGL_IMAGE} ${DOMK_AGL_IMAGE}"
+    agl_guest="DomU(AGL)+DomK(AGL+Ankaios)"
+  elif [ "${ENABLE_ANKAIOS}" = "yes" ]; then
+    AGL_TARGET="${DOMK_AGL_IMAGE}"
+    agl_guest="DomK(AGL+Ankaios)"
+  else
+    AGL_TARGET="${AGL_IMAGE}"
+    agl_guest="DomU(AGL)"
+  fi
+  echo ">> ${agl_guest} in ${AGL_DOCKER}: branch=${AGL_BRANCH} image=${AGL_TARGET}"
   echo ">>   AGL cache: DL_DIR=${AGL_DL_DIR}  SSTATE_DIR=${AGL_SSTATE_DIR}"
   in_docker "$AGL_DOCKER" "
     set -e
@@ -1547,16 +1587,32 @@ if [ "${ENABLE_DOMU}" = "yes" ]; then
     # only; the git transport works regardless.
     repo init --no-clone-bundle -b '${AGL_BRANCH}' -u https://github.com/automotive-grade-linux/AGL-repo.git
     repo sync --no-clone-bundle -j\$(nproc) --retry-fetches=20
+    if [ '${ENABLE_ANKAIOS}' = yes ]; then
+      if [ ! -d external/meta-ankaios/.git ]; then
+        git clone --filter=blob:none --branch '${META_ANKAIOS_BRANCH}' '${META_ANKAIOS_URL}' external/meta-ankaios
+      fi
+      git -C external/meta-ankaios fetch origin '${META_ANKAIOS_BRANCH}'
+      git -C external/meta-ankaios checkout --detach '${META_ANKAIOS_REV}'
+      test \$(git -C external/meta-ankaios rev-parse HEAD) = '${META_ANKAIOS_REV}'
+    fi
     source meta-agl/scripts/aglsetup.sh -m '${AGL_MACHINE}' -b build agl-demo agl-devel agl-kvm agl-ic
     # aglsetup sources oe-init-build-env, so CWD is now the build dir (agl/build)
     # -- the same CWD the bitbake below relies on. Append the shared cache paths to
     # conf/local.conf (relative to the build dir), last so they win over aglsetup's
     # defaults. Values are host-expanded absolute paths.
     printf '%s\n' 'DL_DIR = \"${AGL_DL_DIR}\"' 'SSTATE_DIR = \"${AGL_SSTATE_DIR}\"' >> conf/local.conf
-    bitbake '${AGL_IMAGE}'
+    if [ '${ENABLE_ANKAIOS}' = yes ]; then
+      bitbake-layers add-layer ../external/meta-ankaios
+      bitbake-layers add-layer ../../meta-rpi-sodev/meta-xt-common/meta-xt-domk
+    fi
+    if [ '${ENABLE_ANKAIOS}' = yes ] && [ '${ENABLE_DOMU}' = yes ]; then
+      bitbake '${AGL_IMAGE}' '${DOMK_AGL_IMAGE}'
+    else
+      bitbake '${AGL_TARGET}'
+    fi
   "
 else
-  echo ">> DomU(AGL) SKIPPED (no -u/--domu). SD image omits DomU kernel(p1)+AGL rootfs(p3)."
+  echo ">> AGL guest build SKIPPED (no -u/--domu or -k/--ankaios)."
 fi
 
 # 2) Dom0/DomD (rpi5 base) + final image assembly — moulin + ninja in sodev-builder-rpi.
@@ -1578,6 +1634,7 @@ STAGE_DOMA_KERNEL="meta-rpi-sodev/meta-xt-common/meta-xt-doma/stage-doma-kernel.
 AOSP_CMD=""   # set in source mode below: the AOSP components, run in their own container first
 if [ "$AAOS_MODE" = prebuilt ]; then
   dom_targets="dom0 domd"; [ "$ENABLE_DOMU" = yes ] && dom_targets="$dom_targets domu"
+  [ "$ENABLE_ANKAIOS" = yes ] && dom_targets="$dom_targets domk"
   # DomZ is a separate moulin component (its own west workspace), so in prebuilt
   # mode -- where the domains are built by name instead of via image-full -- it has
   # to be named explicitly, or rouge would look for a zephyr-domz.bin that was
@@ -1585,7 +1642,7 @@ if [ "$AAOS_MODE" = prebuilt ]; then
   [ "$ENABLE_DOMZ" = yes ] && dom_targets="$dom_targets domz"
   NINJA_CMD="ninja $dom_targets"
   if [ "$NINJA_TARGET" = "image-full" ]; then
-    ROUGE_CMD="rouge '${MOULIN_YAML}' --DOM0_OS '${DOM0_OS}' --ENABLE_ANDROID yes --ENABLE_DOMU '${ENABLE_DOMU}' --ENABLE_DOMU_RESERVED '${ENABLE_DOMU_RESERVED}' --ENABLE_DOMZ '${ENABLE_DOMZ}' --BOARD_RAM '${BOARD_RAM}' -fi full -o full.img"
+    ROUGE_CMD="rouge '${MOULIN_YAML}' --DOM0_OS '${DOM0_OS}' --ENABLE_ANDROID yes --ENABLE_DOMU '${ENABLE_DOMU}' --ENABLE_DOMU_RESERVED '${ENABLE_DOMU_RESERVED}' --ENABLE_DOMZ '${ENABLE_DOMZ}' --ENABLE_ANKAIOS '${ENABLE_ANKAIOS}' --BOARD_RAM '${BOARD_RAM}' -fi full -o full.img"
   else
     ROUGE_CMD=":"
   fi
@@ -1608,6 +1665,7 @@ else
     #
     # Same list as the prebuilt branch above.
     dom_targets="dom0 domd"; [ "$ENABLE_DOMU" = yes ] && dom_targets="$dom_targets domu"
+    [ "$ENABLE_ANKAIOS" = yes ] && dom_targets="$dom_targets domk"
     NINJA_CMD="ninja $dom_targets"
   else
     NINJA_CMD="ninja ${NINJA_TARGET}"
@@ -1723,6 +1781,7 @@ if [ "$NINJA_TARGET" = "image-full" ]; then
   # DomU/DomA do: two images that differ only by -z are otherwise
   # indistinguishable once written.
   [ "$ENABLE_DOMZ" = yes ]    && IMG_NAME="${IMG_NAME}-DomZ"
+  [ "$ENABLE_ANKAIOS" = yes ] && IMG_NAME="${IMG_NAME}-DomK"
   IMG_NAME="${IMG_NAME}-$(date +%Y%m%d-%H%M).img"
   echo ">> SD image will be ${IMG_NAME} (full.img -> it)"
   # A leftover symlink from an earlier build has to go BEFORE rouge runs: rouge
@@ -1755,7 +1814,7 @@ in_docker "$XT_DOCKER" "
   # ENABLE_ANDROID=yes run) would otherwise be reused, so a later --dom0/-a/-u
   # change would build against the wrong bblayers.conf.
   rm -rf yocto/build-dom*/conf
-  moulin '${MOULIN_YAML}' --DOM0_OS '${DOM0_OS}' --ENABLE_ANDROID '${ENABLE_ANDROID}' --ENABLE_DOMU '${ENABLE_DOMU}' --ENABLE_DOMU_RESERVED '${ENABLE_DOMU_RESERVED}' --ENABLE_DOMZ '${ENABLE_DOMZ}' --BOARD_RAM '${BOARD_RAM}'
+  moulin '${MOULIN_YAML}' --DOM0_OS '${DOM0_OS}' --ENABLE_ANDROID '${ENABLE_ANDROID}' --ENABLE_DOMU '${ENABLE_DOMU}' --ENABLE_DOMU_RESERVED '${ENABLE_DOMU_RESERVED}' --ENABLE_DOMZ '${ENABLE_DOMZ}' --ENABLE_ANKAIOS '${ENABLE_ANKAIOS}' --BOARD_RAM '${BOARD_RAM}'
   # Zephyr source cache (Yocto DL_DIR analogue): when XT_WEST_CACHE_DIR points at a
   # pre-populated west reference workspace, pull the manifest+projects from it so the
   # west fetches run offline (past a blocking proxy). 'west update' projects come via
@@ -1869,7 +1928,7 @@ in_docker "$XT_DOCKER" "
 "
 }
 
-echo ">> moulin BOARD=${BOARD} (${MOULIN_YAML}) DOM0_OS=${DOM0_OS} BOARD_RAM=${BOARD_RAM} ENABLE_ANDROID=${ENABLE_ANDROID} ENABLE_DOMU=${ENABLE_DOMU} ENABLE_DOMU_RESERVED=${ENABLE_DOMU_RESERVED} ENABLE_DOMZ=${ENABLE_DOMZ} AAOS_MODE=${AAOS_MODE} ninja='${AOSP_CMD:+$AOSP_CMD ; }${NINJA_CMD}'${rouge_note} in ${XT_DOCKER}"
+echo ">> moulin BOARD=${BOARD} (${MOULIN_YAML}) DOM0_OS=${DOM0_OS} BOARD_RAM=${BOARD_RAM} ENABLE_ANDROID=${ENABLE_ANDROID} ENABLE_DOMU=${ENABLE_DOMU} ENABLE_DOMU_RESERVED=${ENABLE_DOMU_RESERVED} ENABLE_DOMZ=${ENABLE_DOMZ} ENABLE_ANKAIOS=${ENABLE_ANKAIOS} AAOS_MODE=${AAOS_MODE} ninja='${AOSP_CMD:+$AOSP_CMD ; }${NINJA_CMD}'${rouge_note} in ${XT_DOCKER}"
 if [ -n "$AOSP_CMD" ]; then
   echo ">> [1/2] AOSP components (DomA source build) in ${XT_DOCKER}${XT_DOCKER_RUN_OPTS_AOSP:+, extra docker run opts: $XT_DOCKER_RUN_OPTS_AOSP}"
   STAGE_RUN_OPTS=( ${XT_DOCKER_RUN_OPTS_AOSP:-} )

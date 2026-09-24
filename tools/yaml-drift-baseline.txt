@@ -2,18 +2,38 @@
 # after tools/check-yaml-drift.py normalises the board-specific tokens.
 # '-' is present only in rpi5-sodev.yaml, '+' only in rpi4-sodev.yaml.
 # Regenerate with: tools/check-yaml-drift.py --update
++                  "linux-domk": "%{YOCTOS_WORK_DIR}/%{DOMK_BUILD_DIR}/tmp/deploy/images/%{DOMU_MACHINE}/Image"
 +                - ["IMAGE_CLASSES:remove", "sdcard_image-rpi"]
 +                - ["IMAGE_FSTYPES:remove", "rpi-sdimg"]
 +                - ["PREFERRED_PROVIDER_virtual/kernel", "linux-raspberrypi"]
 +                - [PREFERRED_PROVIDER_u-boot-default-script, "xt-rpi-u-boot-scr"]
++                desc: "DomK AGL + Ankaios rootfs"
++                gpt_type: B921B045-1DF0-41C3-AF44-4C6F280D3FAE
++                image_path: "agl/build/tmp/deploy/images/%{AGL_GUEST_MACHINE}/%{AGL_GUEST_IMAGE_DOMK}-%{AGL_GUEST_MACHINE}.rootfs.ext4"
++                items:
++                resize: false
++                size: 8192 MiB
++                type: raw_image
++              boot:
++              domk:
++            partitions:
 +          "bcm2712-rpi-4-b.dtb": "%{YOCTOS_WORK_DIR}/%{DOMD_BUILD_DIR}/tmp/deploy/images/%{MACHINE}/bcm2712-rpi-4-b.dtb"
 +          "bl31.bin":       "%{YOCTOS_WORK_DIR}/%{DOMD_BUILD_DIR}/tmp/deploy/images/%{MACHINE}/bl31.bin"
 +          "overlays/disable-bt.dtbo": "%{YOCTOS_WORK_DIR}/%{DOMD_BUILD_DIR}/tmp/deploy/images/%{MACHINE}/disable-bt.dtbo"
 +          BOARD_RAM: "4g"
 +          BOARD_RAM: "8g"
 +          RPI4_PANEL_GUEST: "DomA"
++          RPI4_PANEL_GUEST: "DomK"
 +          RPI4_PANEL_GUEST: "DomU"
 +          XT_DOMA_BBMASK: " meta-xt-common/meta-xt-doma/ meta-xt-rpi5/recipes-extended/xt-xen-cfg-doma/ meta-xt-rpi5/recipes-extended/xt-aaos-host-services/"
++          XT_DOMK_CFG_INSTALL: ""
++          XT_DOMK_CFG_INSTALL: "xt-xen-cfg-domk"
++          full:
++        - "../../meta-rpi-sodev/meta-xt-common/meta-xt-domk"
++        - "../../meta-rpi-sodev/meta-xt-common/meta-xt-domu"
++        - "../../meta-rpi-sodev/meta-xt-common/meta-xt-security"
++        - "../meta-ankaios-wrynose"
++        - "tmp/deploy/images/%{DOMU_MACHINE}/Image"
 +        - "tmp/deploy/images/%{MACHINE}/%{SOC_FAMILY}-%{MACHINE}-mmc.dtbo"
 +        - "tmp/deploy/images/%{MACHINE}/%{SOC_FAMILY}-%{MACHINE}-pcie1.dtbo"
 +        - "tmp/deploy/images/%{MACHINE}/%{SOC_FAMILY}-%{MACHINE}-usb.dtbo"
@@ -27,28 +47,56 @@
 +        - "tmp/deploy/images/%{MACHINE}/pcie1-passthrough.dtbo"
 +        - "tmp/deploy/images/%{MACHINE}/rpi5-image-xt-domd-vc4-initramfs-%{MACHINE}.rootfs.cpio.gz"
 +        - "tmp/deploy/images/%{MACHINE}/usb-passthrough.dtbo"
++        - *COMMON_YOCTO_LAYERS
++        - *LINUX_DOMAIN_CONF
 +        - ["IMAGE_CLASSES:remove", "sdcard_image-rpi"]
 +        - ["IMAGE_FSTYPES:remove", "rpi-sdimg"]
 +        - ["PREFERRED_PROVIDER_virtual/kernel", "linux-raspberrypi"]
 +        - [AAOS_DEVICE, "%{ANDROID_DEVICE}"]
 +        - [AAOS_KERNEL_TREE, "${TOPDIR}/../../%{ANDROID_KERNEL_DIR}"]
 +        - [AAOS_SRC_TREE, "${TOPDIR}/../../%{DOMA_DIR}"]
++        - [BBMASK:append, " meta-xt-domu/recipes-agl/"]
++        - [MACHINE, "%{DOMU_MACHINE}"]
 +        - [RPI4_PANEL_GUEST, "%{RPI4_PANEL_GUEST}"]
++        - [XT_DOMK_CFG_INSTALL, "%{XT_DOMK_CFG_INSTALL}"]
++        - [XT_DOM_NAME, "domk"]
++        dir: "meta-ankaios-wrynose"
++        images:
++        rev: "df407e3d19a5efc70271451a87341ee0ab835e85"
++        url: "https://github.com/eclipse-ankaios/meta-ankaios.git"
 +        variables:
++      - *COMMON_YOCTO_SOURCES
++      - type: git
++      build_target: "core-image-minimal"
++      conf:
 +      default: true
++      layers:
 +      overrides:
++      target_images:
++      type: yocto
++      work_dir: "%{DOMK_BUILD_DIR}"
 +    "4g":
 +    "8g":
++    "no":
++    "yes":
++    build-dir: "%{YOCTOS_WORK_DIR}"
++    builder:
++    desc: "Build the RPi5 4 GiB DomK Ankaios PoC (p1 kernel + p3 AGL rootfs + DomD xl configuration)."
 +    desc: "DomD rootfs only (RPi5)"
 +    desc: "Full RPi5(BCM2711)+Xen SD image (thin Linux or Zephyr Dom0 + dom0less DomD + DomU AGL + DomA AAOS)"
 +    desc: "Target Raspberry Pi 5 SKU: 8g (default; all four domains up together) or 4g (DomD 1024 MiB; DomU or DomA, one at a time)"
++    sources:
++  AGL_GUEST_IMAGE_DOMK: "agl-image-domk"
 +  ANDROID_DEVICE: "xenvm_trout_rpi5_arm64"
 +  ANDROID_KERNEL_DIR: "android_kernel-rpi5"
 +  BOARD_RAM:
 +  DOM0_OS: "zephyr"          # default zephyr; overridable: --DOM0_OS {zephyr|linux}. On a new board bring the thin-Linux Dom0 up first: it is a relocatable arm64 Image, so it does not depend on the Zephyr SRAM relink being right.
 +  DOMA_DIR: "android-rpi5"
++  DOMK_BUILD_DIR: "build-domk"
++  ENABLE_ANKAIOS:
 +  MACHINE: "raspberrypi5"   # meta-raspberrypi machine (SOC_FAMILY=rpi, MACHINEOVERRIDES raspberrypi5, DEFAULTTUNE cortexa76-nocrypto)
 +  XT_DOMA_SOURCE_GROUP: "default,rpi5"
++  domk:
 -                - [BOARD_RAM, "%{BOARD_RAM}"]
 -                - [XEN_DT_SCMI, "%{XEN_DT_SCMI_NAME}"]
 -          "armstub8-2712.bin": "%{YOCTOS_WORK_DIR}/%{DOMD_BUILD_DIR}/tmp/deploy/images/%{MACHINE}/armstub8-2712.bin"

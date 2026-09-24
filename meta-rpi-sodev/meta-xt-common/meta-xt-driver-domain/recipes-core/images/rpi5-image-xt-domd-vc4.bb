@@ -128,6 +128,9 @@ XT_DOMU_CFG_INSTALL ??= ""
 # xl-create-domz.service, so a DomZ-less build must not ship it.
 XT_DOMZ_CFG_INSTALL ??= ""
 
+# DomK PoC lifecycle configuration and the DomD ank operator CLI.
+XT_DOMK_CFG_INSTALL ??= ""
+
 # Dev-convenience posture, matching the V4H SoDeV reference (see the security note
 # in the top-level README before deploying outside a closed lab).
 IMAGE_FEATURES:append = " empty-root-password allow-empty-password allow-root-login ssh-server-openssh"
@@ -140,6 +143,7 @@ IMAGE_INSTALL:append = " \
     ${DOMD_RUNTIME_PACKAGES} \
     ${XT_DOMU_CFG_INSTALL} \
     ${XT_DOMZ_CFG_INSTALL} \
+    ${XT_DOMK_CFG_INSTALL} \
 "
 
 BAD_RECOMMENDATIONS += "busybox-syslog"

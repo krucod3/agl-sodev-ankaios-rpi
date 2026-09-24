@@ -1,0 +1,22 @@
+# SPDX-License-Identifier: Apache-2.0
+[Unit]
+Description=Launch DomK (AGL Ankaios PoC) via xl create
+Requires=domd-toolstack-prep.service
+After=domd-toolstack-prep.service
+
+[Service]
+Environment="XDG_RUNTIME_DIR=/run"
+Environment="WAYLAND_DISPLAY=wayland-0"
+Environment="SDL_VIDEODRIVER=wayland"
+Environment="V3D_DEBUG=db"
+Type=oneshot
+RemainAfterExit=yes
+ExecStartPre=/bin/sh -c '[ -f /mnt/linux-domk ] || mount /dev/mmcblk0p1 /mnt'
+ExecStartPre=/bin/sh -c 'for i in $$(seq 1 120); do [ "$$(xenstore-read /local/domain/1/drivers/weston-up/status 2>/dev/null)" = "ready" ] && exit 0; sleep 1; done; echo "DomD weston-up not ready after 120s"; exit 1'
+ExecStart=/usr/sbin/xl create /etc/xen/domk.cfg
+ExecStop=/usr/sbin/xl shutdown -w DomK
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

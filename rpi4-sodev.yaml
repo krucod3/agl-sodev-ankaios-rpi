@@ -48,6 +48,7 @@ variables:
   DOM0_BUILD_DIR: "build-dom0"
   DOMD_BUILD_DIR: "build-domd"
   DOMU_BUILD_DIR: "build-domu"
+  DOMK_BUILD_DIR: "build-domk"
   MACHINE: "raspberrypi4-64"   # meta-raspberrypi machine (SOC_FAMILY=rpi, MACHINEOVERRIDES raspberrypi4, DEFAULTTUNE cortexa72-nocrypto)
   # NOTE: this is the workspace's OWN naming variable (fed to the DomD build as
   # RPI_SOC_FAMILY), used only to template the DT file names
@@ -166,6 +167,7 @@ variables:
   # --- DomU (AGL) — informational; actual build is in build.sh ---
   AGL_GUEST_MACHINE: "virtio-aarch64"
   AGL_GUEST_IMAGE_IC: "agl-cluster-demo-flutter-guest"
+  AGL_GUEST_IMAGE_DOMK: "agl-image-domk"
 
 common_data:
   # === Wrynose 6.0 LTS (component repos) ===========================================
@@ -885,6 +887,35 @@ parameters:
                 items:
                   "zephyr-domz.bin": "%{ZEPHYR_DOMZ_DIR}/%{ZEPHYR_DOMZ_BUILD_DIR}/zephyr/zephyr.bin"
 
+  # DomK proof of concept: RPi4 4 GiB, Zephyr Dom0, optionally alongside DomU,
+  # but never DomA. build.sh enforces that envelope; this parameter owns only
+  # the resulting artifacts.
+  ENABLE_ANKAIOS:
+    desc: "Build the RPi4 4 GiB DomK Ankaios PoC (p1 kernel + p3 AGL rootfs + DomD xl configuration)."
+    "no":
+      default: true
+      overrides:
+        variables:
+          XT_DOMK_CFG_INSTALL: ""
+    "yes":
+      overrides:
+        variables:
+          XT_DOMK_CFG_INSTALL: "xt-xen-cfg-domk"
+          RPI4_PANEL_GUEST: "DomK"
+        images:
+          full:
+            partitions:
+              boot:
+                items:
+                  "linux-domk": "%{YOCTOS_WORK_DIR}/%{DOMK_BUILD_DIR}/tmp/deploy/images/%{DOMU_MACHINE}/Image"
+              domk:
+                desc: "DomK AGL + Ankaios rootfs"
+                gpt_type: B921B045-1DF0-41C3-AF44-4C6F280D3FAE
+                type: raw_image
+                resize: false
+                size: 8192 MiB
+                image_path: "agl/build/tmp/deploy/images/%{AGL_GUEST_MACHINE}/%{AGL_GUEST_IMAGE_DOMK}-%{AGL_GUEST_MACHINE}.rootfs.ext4"
+
 components:
   # =========================================================================
   # Dom0 / DomD — RPi5 base, copied verbatim from external/meta-xt-prod-devel-rpi5/rpi5.yaml.
@@ -928,6 +959,13 @@ components:
       - type: git
         url: "https://github.com/kraj/meta-clang"
         rev: "ef0d22f21910a0c30c967eeb17d8f209806e2d81"
+      # DomD is Wrynose, so use the matching meta-ankaios branch revision and
+      # install only its ank-bin split package. DomK uses the separately pinned
+      # Scarthgap checkout prepared by build.sh.
+      - type: git
+        url: "https://github.com/eclipse-ankaios/meta-ankaios.git"
+        rev: "df407e3d19a5efc70271451a87341ee0ab835e85"
+        dir: "meta-ankaios-wrynose"
     builder:
       type: yocto
       work_dir: "%{DOMD_BUILD_DIR}"
@@ -1097,6 +1135,7 @@ components:
         # into the DomD rootfs. Set in the dom0(linux) conf as well —
         # meta-xt-domz is in both layer sets.
         - [XT_DOMZ_CFG_INSTALL, "%{XT_DOMZ_CFG_INSTALL}"]
+        - [XT_DOMK_CFG_INSTALL, "%{XT_DOMK_CFG_INSTALL}"]
         - [BBMASK:append, "%{XT_DOMA_BBMASK}"]
         # [ENABLE_ANDROID gate, second consequence] weston lives in DomD, and only
         # micro-HDMI 1 is wired on this board, so the app-id -> output map in
@@ -1108,6 +1147,7 @@ components:
         - *COMMON_YOCTO_LAYERS
         - "../meta-raspberrypi"
         - "../meta-openembedded/meta-perl"
+        - "../meta-ankaios-wrynose"
         # [fullmetavirt] consolidated meta-xt-* layers (ws-vendored single source).
         # meta-xt-rpi4 carries the Xen 4.22 bbappend + patch series, the shared
         # linux-raspberrypi_6.18 DT/config bbappend, CMA/USB/DVFS rpi-config, and
@@ -1141,6 +1181,10 @@ components:
         # the toolstack domain in the zephyr flavour. Gated by
         # %{XT_DOMZ_CFG_INSTALL}.
         - "../../meta-rpi-sodev/meta-xt-common/meta-xt-domz"
+        # DomK PoC lifecycle and DomD ank CLI configuration. The CLI package is
+        # ank-bin from the pinned Wrynose meta-ankaios layer above. The AGL-only
+        # image recipes are hidden here by BBFILES_DYNAMIC because aglcore is absent.
+        - "../../meta-rpi-sodev/meta-xt-common/meta-xt-domk"
         # DomA integration layer (meta-xt-doma): stacks the vhost_xen kernel bbappend
         # on the DomD linux-raspberrypi build and installs xt-aaos-host-services
         # (VHAL/dumpstate) + domd-vhost-xen-domid into the DomD image. Always in
@@ -1262,6 +1306,28 @@ components:
         - *COMMON_YOCTO_LAYERS
         # V4H-minimal DomU layer set: meta-xt-domu (DomU kernel linux-virtio-armv8 +
         # integration recipes, incl. the weston-init bbappend) + meta-xt-security.
+        - "../../meta-rpi-sodev/meta-xt-common/meta-xt-domu"
+        - "../../meta-rpi-sodev/meta-xt-common/meta-xt-security"
+      target_images:
+        - "tmp/deploy/images/%{DOMU_MACHINE}/Image"
+
+  # DomK uses the same Xen-aware virtio guest kernel as DomU. Its graphical
+  # rootfs is built separately by build.sh from AGL Scarthgap.
+  domk:
+    build-dir: "%{YOCTOS_WORK_DIR}"
+    sources:
+      - *COMMON_YOCTO_SOURCES
+    builder:
+      type: yocto
+      work_dir: "%{DOMK_BUILD_DIR}"
+      conf:
+        - *LINUX_DOMAIN_CONF
+        - [MACHINE, "%{DOMU_MACHINE}"]
+        - [XT_DOM_NAME, "domk"]
+        - [BBMASK:append, " meta-xt-domu/recipes-agl/"]
+      build_target: "core-image-minimal"
+      layers:
+        - *COMMON_YOCTO_LAYERS
         - "../../meta-rpi-sodev/meta-xt-common/meta-xt-domu"
         - "../../meta-rpi-sodev/meta-xt-common/meta-xt-security"
       target_images:

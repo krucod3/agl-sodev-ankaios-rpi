@@ -32,6 +32,7 @@ do_install:append() {
     # domu keeps a static 192.168.10.12 in its rootfs; this mapping is a
     # consistent fallback should it ever DHCP.
     echo "dhcp-host=${XT_DOMU_MAC},domu,${XT_DOMU_IP},infinite" >> ${D}${sysconfdir}/dnsmasq.conf
+    echo "dhcp-host=${XT_DOMK_MAC},domk,${XT_DOMK_IP},infinite" >> ${D}${sysconfdir}/dnsmasq.conf
 
     # Use resolve.conf provided by systemd-resolved
     echo "resolv-file=/run/systemd/resolve/resolv.conf" >> ${D}${sysconfdir}/dnsmasq.conf

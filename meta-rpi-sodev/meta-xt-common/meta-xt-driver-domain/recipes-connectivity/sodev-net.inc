@@ -43,6 +43,8 @@ XT_DOMU_IP          ??= "192.168.10.12"
 XT_DOMA_IP          ??= "192.168.10.13"
 # DomA eth0 static lease
 XT_DOMA_ETH0_IP     ??= "192.168.10.14"
+# DomK Ankaios PoC static lease
+XT_DOMK_IP          ??= "192.168.10.15"
 XT_DHCP_RANGE_START ??= "192.168.10.100"
 XT_DHCP_RANGE_END   ??= "192.168.10.200"
 
@@ -61,3 +63,5 @@ XT_DOMU_MAC      ??= "08:00:27:ff:cb:c2"
 XT_DOMA_MAC      ??= "08:00:27:ff:cb:cf"
 # DomA eth0
 XT_DOMA_ETH0_MAC ??= "08:00:27:ff:cb:ce"
+# DomK virtio-net
+XT_DOMK_MAC      ??= "08:00:27:ff:cb:cd"

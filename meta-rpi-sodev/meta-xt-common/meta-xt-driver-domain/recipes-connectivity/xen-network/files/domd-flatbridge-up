@@ -23,7 +23,13 @@ UPLINK_GW=192.168.10.1
 XSKEY=/local/domain/1/data/flatbridge
 xsr() { xenstore-write "$XSKEY" "$(xenstore-read "$XSKEY" 2>/dev/null);$*" 2>/dev/null || true; }
 xenstore-write "$XSKEY" "start uptime=$(cut -d. -f1 /proc/uptime)" 2>/dev/null || true
-# Wait for the first guest tap to appear. multi-user.target fires much earlier
+# Derive the taps this build can produce from the installed xl configs.
+expected=""
+[ -f /etc/xen/doma.cfg ] && expected="$expected vif-emu vif-emu1"
+[ -f /etc/xen/domu.cfg ] && expected="$expected vif-emu2"
+[ -f /etc/xen/domk.cfg ] && expected="$expected vif-emu5"
+
+# Wait for the first expected guest tap to appear. multi-user.target fires much earlier
 # than the old graphical anchor, so this wait now carries the whole
 # post-guest-creation timing requirement. Skipped entirely in a guest-less build,
 # where no tap can ever appear and the wait would just add its full length to
@@ -33,10 +39,14 @@ xenstore-write "$XSKEY" "start uptime=$(cut -d. -f1 /proc/uptime)" 2>/dev/null |
 # has always appeared within a few seconds of the guest being created, and the
 # bound is only there so a build where no guest ever starts still reaches the
 # rest of this script. Treat it as a conservative ceiling, not a requirement.
-if [ -f /etc/xen/doma.cfg ] || [ -f /etc/xen/domu.cfg ]; then
+if [ -n "$expected" ]; then
     i=0
     while [ $i -lt 90 ]; do
-        [ -e /sys/class/net/vif-emu ] && break
+        found=0
+        for t in $expected; do
+            [ -e /sys/class/net/$t ] && found=1 && break
+        done
+        [ "$found" -eq 1 ] && break
         i=$((i+1)); sleep 2
     done
 fi
@@ -95,9 +105,6 @@ ip route replace default via "$UPLINK_GW" dev xenbr0 2>/dev/null
 # t+12 s) justifies the early break, not the size of the bound. It only decides
 # how long a build whose taps never appear delays the targets that wait on this
 # unit before logging the warning below.
-expected=""
-[ -f /etc/xen/doma.cfg ] && expected="$expected vif-emu vif-emu1"
-[ -f /etc/xen/domu.cfg ] && expected="$expected vif-emu2"
 if [ -z "$expected" ]; then
     log "no guest xl config present; nothing to enslave"
 else

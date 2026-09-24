@@ -15,3 +15,8 @@ FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}:"
 # this fragment flips it on. The base recipe inherits kernel-yocto, so a
 # file://*.cfg in SRC_URI is auto-merged on top of the defconfig.
 SRC_URI += "file://xen-force-grant.cfg"
+
+# crun implements the cgroup-v2 device controller with eBPF. DomK runs Podman
+# workloads, so its guest kernel needs the BPF syscall and cgroup BPF hooks.
+# Keep this out of DomU, which uses the same kernel recipe but runs no containers.
+SRC_URI:append = "${@' file://container-bpf.cfg' if d.getVar('XT_DOM_NAME') == 'domk' else ''}"

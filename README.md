@@ -3,13 +3,15 @@
 > **Documentation map** — [`README.md`](README.md) build and run |
 > [`docs/BUILD.md`](docs/BUILD.md) build details |
 > [`docs/DESIGN.md`](docs/DESIGN.md) why the tree looks like this |
-> [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md) when it does not work
+> [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md) when it does not work |
+> [`docs/ANKAIOS-DOMK.md`](docs/ANKAIOS-DOMK.md) DomK Ankaios PoC
 A **Raspberry Pi 5** port of the AGL (Automotive Grade Linux) SoDeV
 disaggregated-cockpit demo (R-Car V4H / Sparrow Hawk): **Xen 4.22** running a
 minimal control Dom0 (Zephyr by default, thin Linux as an alternative), a GPU
 driver domain, an AGL instrument cluster and Android Automotive OS — dual
 display, one board. **The build produces a bootable SD-card image (`full.img`)**
-containing all four virtual machines.
+containing the selected domains. An RPi4-only proof of concept additionally
+supports an AGL DomK guest that runs Eclipse Ankaios-managed containers.
 
 This workspace complements
 [`xen-troops/meta-xt-prod-devel-rpi5`](https://github.com/xen-troops/meta-xt-prod-devel-rpi5)
@@ -30,18 +32,21 @@ was kept identical.
   |- Dom0 : Zephyr, xenstore server only (no toolstack, no drivers)      [1 vCPU  @ pCPU 0]
   |- DomD : dom0less direct-mapped driver domain — vc4/v3d GPU, RP1,
   |         SDHCI, Mesa 26.0.5 + weston 15.0.0 + qemu 7.0.0 device-models,
-  |         AND the xl toolstack that creates DomU/DomA/DomZ             [2 vCPUs @ pCPU 0-1]
+  |         AND the xl toolstack that creates the optional guests        [2 vCPUs @ pCPU 0-1]
   |- DomU : AGL instrument cluster (Flutter cluster demo) -> HDMI-A-1    [1 vCPU  @ pCPU 1]
   |- DomA : Android Automotive OS (trout/xenvm)           -> HDMI-A-2    [2 vCPUs @ pCPU 2-3]
   |- DomZ : Zephyr RTOS domain (xenvm board)                             [1 vCPU  @ pCPU 0]
+
+  RPi4 4 GiB DomK PoC (DOM0_OS=zephyr only)
+  `- DomK : AGL + Ankaios server/agent + Podman/crun      -> HDMI-A-1    [1 vCPU  @ pCPU 3]
 
   DOM0_OS=linux (alternative — classic control plane)
   |- Dom0 : thin Linux control domain (xl toolstack, SD owner); DomD is
             still dom0less; Dom0's xl service chain creates DomU/DomA/DomZ.
 ```
-The diagram shows the full 5-domain cockpit; **the default build is Dom0 + DomD
-only** — the DomU, DomA and DomZ guests are opt-in (`-u`/`-a`/`-z`, see *Build
-configuration*).
+The diagram shows the full 5-domain cockpit and the separate DomK PoC; **the
+default build is Dom0 + DomD only** — DomU, DomA, DomZ and DomK are opt-in
+(`-u`/`-a`/`-z`/`-k`, see *Build configuration*).
 
 ## Quick start (build the SD image)
 
@@ -61,6 +66,9 @@ git submodule update --init --recursive
 # ./build.sh -z                  # + DomZ (Zephyr RTOS domain)
 # ./build.sh --dom0=linux -u -a  # thin Linux control Dom0 instead of Zephyr
 # ./build.sh --board=rpi4 -u -a  # Raspberry Pi 4 (BCM2711) instead of Pi 5
+# ./build.sh --board=rpi4 --ram=4g -k     # DomK Ankaios PoC, HDMI-A-1
+# ./build.sh --board=rpi4 --ram=4g -k -u  # DomK + DomU, on HDMI-A-1/HDMI-A-2
+# ./build.sh --board=rpi4 --ram=4g -k --domains-only  # domains, no full.img
 
 # 3. Flash it to an SD card (double-check <sd-dev>!)
 sudo dd if=full.img of=/dev/<sd-dev> bs=4M conv=fsync status=progress
@@ -84,6 +92,12 @@ Before you build:
 - The **default** image is guest-less (Dom0 + DomD): it boots but shows **no
   instrument cluster / Android** on the displays. The full dual-display demo
   needs `-u -a`.
+- **`-k` / `--ankaios` enables the DomK PoC.** It currently requires
+  `--board=rpi4 --ram=4g` and the default `--dom0=zephyr`, and cannot be combined
+  with `-a` or any other DomA-enabling `--aaos` mode. DomK may be built alone or
+  with `-u`; alone it owns HDMI-A-1, while the combined build puts DomK on
+  HDMI-A-1 and DomU on HDMI-A-2. The SD image includes the Xen-aware DomK kernel
+  and an 8 GiB `PARTLABEL=domk` AGL rootfs with Ankaios, Podman and `crun`.
 - **`-a` (Android) = `--aaos=auto`**: how DomA is produced is chosen by `--aaos`
   (`off` | `auto` | `source` | `prebuilt`). **Nothing has to be staged by hand.**
   `--aaos=source` builds AAOS from public sources (measured: 5 h 11 min and 272 GiB of
@@ -128,9 +142,9 @@ Before you build:
 ## Build configuration
 `build.sh` drives moulin + ninja inside Docker. It takes V4H `build.sh`-style
 flags (run `./build.sh -h`); the matching env vars are the fallback. **The
-default build is Dom0(Zephyr) + DomD only — the DomU and DomA guests are
-opt-in** (matching upstream `sodev-demo-workspace` commit `f3f0f8f7`, which
-disables the heavy Android/Flatcar guests by default).
+default build is Dom0(Zephyr) + DomD only — all application guests are opt-in.**
+This matches upstream `sodev-demo-workspace` commit `f3f0f8f7`, which disables
+the heavy Android/Flatcar guests by default.
 
 | Flag (env var) | Default | Effect |
 |---|---|---|
@@ -139,6 +153,7 @@ disables the heavy Android/Flatcar guests by default).
 | `--ram=<sku>` (`BOARD_RAM`) | **16g** (rpi5) / **8g** (rpi4) | Board SKU; the valid values and the default depend on `--board`. **rpi5: `16g`\|`8g`.** `16g` = the full 4-domain map (Dom0 512 + DomD 4096 + DomU 1024 + DomA 4096 = 9728 MiB). `8g` takes **DomD to 3072 MiB** (static-mem bank4 at `0x180000000` dropped) **and DomA to 3072 MiB**; Dom0/DomU keep their sizes, so the four total 7680 MiB and fit an 8 GB board. Splitting the reduction is measured, not a preference — see *Board RAM size* (`docs/DESIGN.md`). **rpi4: `8g`\|`4g`.** `8g` = Dom0 128 (zephyr, the default) or 256 (linux) + DomD 1920 + DomU 1024 + DomA 2560; `4g` takes DomD to 1024 MiB (bank2 dropped, bank0 to 640 MiB) and DomA and DomU can no longer RUN at the same time — each fits alone, and `build.sh` says so |
 | `-u`, `--domu` (`ENABLE_DOMU`) | **off** | Adds the AGL instrument-cluster DomU: Xen-aware kernel `linux-virtio-armv8` (p1) + AGL rootfs (p3). V4H-aligned minimal domu layer set (kernel via moulin; AGL rootfs via `build.sh`'s AGL bitbake) |
 | `-a`, `--android` (`ENABLE_ANDROID`) | **off** | Include DomA (AAOS, p4 nested GPT). Alias for `--aaos=auto` — the mode chooses how DomA is produced |
+| `-k`, `--ankaios` (`ENABLE_ANKAIOS`) | **off** | Adds the DomK Ankaios PoC. Requires `--board=rpi4 --ram=4g --dom0=zephyr`; supports DomK alone or DomK + DomU (`-k -u`) and rejects DomA. Builds the `agl-image-domk` AGL rootfs plus a Xen-aware kernel, installs the DomD-side `domk.cfg`/launch service and `ank` CLI, and adds an 8 GiB `domk` partition. DomK owns HDMI-A-1; in the combined build DomU uses HDMI-A-2. See [`docs/ANKAIOS-DOMK.md`](docs/ANKAIOS-DOMK.md) |
 | `-z`, `--domz` (`ENABLE_DOMZ`) | **off** | Adds DomZ, the Zephyr RTOS domain: Zephyr built for its own Xen-guest board (`xenvm`, GICv2, Xen PV console) out of a second west workspace, staged on p1 as `zephyr-domz.bin` and started by the xl toolstack from `/etc/xen/domz.cfg`. 16 MiB / 1 vCPU, no rootfs and **no new partition**, so the p2/p3/p4 layout is unchanged. Console: `xl console DomZ`. See [`domz/README.md`](domz/README.md) |
 | `--domains-only` (`NINJA_TARGET=""`) | off | Build the domains but skip SD-image assembly |
 | `--aaos=<mode>` (`AAOS_MODE`) | off (`-a`⇒auto) | `off` \| `auto` \| `source` \| `prebuilt`. **auto** = prebuilt if a bundle is found (default probe `<workspace>/aaos-prebuilt-<board>`, then `<workspace>/aaos-prebuilt`), else source if an AOSP checkout is found, else off (or a hard error when DomA was required via `-a`) |
@@ -158,6 +173,7 @@ disables the heavy Android/Flatcar guests by default).
 | (`XT_DOCKER_RUN_OPTS_AOSP`) | — | Extra `docker run` options for the **AOSP (DomA source) container only**, added on top of `XT_DOCKER_RUN_OPTS`. This is where the three nsjail `--security-opt ... unconfined` relaxations go (*0. Check the host* in `docs/BUILD.md`): the Yocto/Zephyr container must stay confined, or BitBake's user-namespace check fails on Ubuntu 24.04 hosts (`build.sh` refuses the global form there). On those hosts `apparmor=unconfined` does not rescue nsjail either -- use the confining `docker-nsjail-build` profile from `docs/BUILD.md`, or lower `kernel.apparmor_restrict_unprivileged_userns` for the build |
 | (`XT_DOCKER`) | `sodev-builder-rpi` | Tag of the unified build image. Deliberately not `sodev-builder`, the tag the V4H `sodev-demo-workspace` uses: on a host that builds both, one shared name would let `--rebuild-images` here replace the V4H image |
 | (`AGL_IMAGE`) / (`AGL_MACHINE`) | `agl-cluster-demo-flutter-guest` / `virtio-aarch64` | Image recipe and `MACHINE` for the DomU AGL build (`aglsetup.sh -m` then `bitbake`) |
+| (`DOMK_AGL_IMAGE`) | `agl-image-domk` | AGL image recipe built for DomK when `-k` is enabled. Override only when supplying a compatible DomK image recipe from the same configured AGL layers |
 | (`AGL_DOCKER`) | `$XT_DOCKER` | Image for the DomU AGL bitbake. Follows `XT_DOCKER`; set it to the AGL-official `docker-worker` to use that instead (then `docker pull` it yourself -- `build.sh` builds only its own tag) |
 | `--sstate=<dir>` (`XT_SSTATE_DIR`) | — | Reuse an external Yocto sstate cache; bind-mounted into the builders Must name an **existing** directory (a typo would otherwise rebuild everything against an empty cache); an existing but empty one is accepted with a note. |
 | `--dl=<dir>` (`XT_DL_DIR`) | — | Reuse an external Yocto downloads dir; bind-mounted into the builders Must name an existing directory, as `--sstate`. |
@@ -168,6 +184,12 @@ DomU / DomA gating follows the V4H `prod-devel-rcar4_new.yaml` idiom: the
 its recipes via `BBMASK` (`XT_DOMA_BBMASK`), so a guest-less build never parses
 the AAOS-prebuilt SRC_URI and never references an unbuildable provider. See the
 in-file comments of `rpi5-sodev.yaml` (the authoritative documentation).
+
+DomK is a separate RPi4 PoC gate. `build.sh` validates its board, RAM, Dom0 and
+DomA exclusions before entering Docker, builds the AGL rootfs with the pinned
+Scarthgap `meta-ankaios` layer, and passes `ENABLE_ANKAIOS=yes` to moulin. The
+complete implementation and current validation status are in
+[`docs/ANKAIOS-DOMK.md`](docs/ANKAIOS-DOMK.md).
 
 ## Build — details & options
 The *Quick start* above is the happy path (`./build.sh` → `full.img`); *Build
@@ -246,6 +268,7 @@ Moved to [`docs/DESIGN.md`](docs/DESIGN.md) — the 16 GB and 8 GB memory maps, 
 | DomD device-model | QEMU 7.0.0 (Xen IOREQ, virtio-gpu-gl, vhost-net/-vsock) |
 | DomU guest | AGL SoDeV instrument cluster (`agl-cluster-demo-flutter-guest`, kernel 6.8.0-rc1 — historically aligned with the V4H AGL SoDeV DomU kernel: torvalds linux `6613476e` + the single Xen backend-domid patch, plus the RPi5-specific `xen-force-grant.cfg`; the current V4H submodule has since moved to a 6.12-series DomU kernel; MACHINE virtio-aarch64) |
 | DomA guest | AAOS (`aosp_xenvm_trout_rpi5_arm64` / `aosp_xenvm_trout_rpi4_arm64`), Xen virtio (CONFIG_XEN / XEN_VIRTIO). The virtio contract is the V4H one: a complete V4H-built AAOS image (kernel, ramdisk and p4 from one build) boots unmodified -- measured in 2026-07 with a V4H Android 17 image on this stack while it was still Android 15. `build.sh` nevertheless accepts only prebuilt bundles that declare this tree's own generation (Android 17 / GKI 6.18.32, `BUNDLE-INFO`): the failure it guards against is a *mixed* set, a guest kernel and a `vendor_dlkm` from different builds, which share no `module_layout` and boot to a black panel |
+| DomK guest | RPi4 4 GiB PoC: AGL `agl-image-domk`, Eclipse Ankaios 1.0.3 server/agent and `ank`, Podman 5.0.1 with `crun` 1.14.3, Weston and Xen virtio devices. See [`docs/ANKAIOS-DOMK.md`](docs/ANKAIOS-DOMK.md) |
 | DomZ guest | Zephyr 4.4.1 (the same manifest and pins as Dom0 — its own west workspace, brought to 4.4.1 by `apply-zephyr-patches.sh --manifest-only`), board `xenvm` (GICv2, Xen PV console), Zephyr SDK 1.0.1 / `aarch64-zephyr-elf`. Application in [`domz/`](domz/README.md) |
 
 
@@ -257,9 +280,9 @@ See also:
 .
 ├── build.sh                 # orchestrator (Docker; mirror of AGL sodev-demo-workspace/build.sh)
 ├── rpi5-sodev.yaml          # moulin entry (Raspberry Pi 5): Dom0/DomD/DomU/DomA/DomZ build + SD-image wiring
-├── rpi4-sodev.yaml          # moulin entry (Raspberry Pi 4 / BCM2711), same domain set; ./build.sh --board=rpi4
+├── rpi4-sodev.yaml          # RPi4 entry: the same domains plus the optional DomK PoC (-k)
 ├── docker/                  # unified sodev-builder-rpi build image (built on demand)
-├── docs/                    # BUILD.md (build detail) / DESIGN.md (why) / TROUBLESHOOTING.md
+├── docs/                    # build/design/troubleshooting docs + ANKAIOS-DOMK.md
 ├── domz/                    # DomZ = the Zephyr RTOS guest (-z)
 │   ├── app/                 #   Zephyr application for the `xenvm` board
 │   ├── tools/               #   QEMU harness (xl create on a PC) + its Yocto layer
@@ -275,6 +298,7 @@ See also:
 │   │   ├── meta-xt-driver-domain/   # DomD image (p2 rootfs), kernel (vhost_xen/vc4), weston, qemu, xen-network
 │   │   ├── meta-xt-domu/            # DomU xl cfg + cluster recipes + virtio kernel
 │   │   ├── meta-xt-domz/            # DomZ xl cfg (domz.cfg) + xl-create-domz.service
+│   │   ├── meta-xt-domk/            # DomK AGL image integration, Ankaios workloads and Xen lifecycle
 │   │   ├── meta-xt-doma/            # DomA xl cfg + AAOS host services + guest binaries
 │   │   ├── meta-xt-domx/            # shared cross-guest recipes (libc-headers, base-files, ...)
 │   │   ├── meta-xt-{qemu,security}/ # vendored upstream
@@ -322,6 +346,7 @@ Moved to [`docs/DESIGN.md`](docs/DESIGN.md) — what this port changed relative 
 | Dom0 (linux) | **UART**: physical debug UART — press `Ctrl-A` three times to cycle input to `DOM0` (Linux login). **SSH**: Dom0 sits on the private point-to-point link `192.168.0.1` (the DomD netfront is deliberately *not* bridged into the flat segment — bridging wedges DomD's xenbus). `sshd` is socket-activated. Reach it from the bench PC via DomD's IP forwarding: `sudo ip route add 192.168.0.0/24 via 192.168.10.10 && ssh root@192.168.0.1` |
 | DomD | **SSH** (primary): `ssh root@192.168.10.10` — DomD runs the toolstack, so `xl list` / `xl console <domU/domA>` run from here. **UART**: DomD is a dom0less **vpl011** domain (console → hypervisor ring), so `xl console 1` / `xu console 1` cannot attach it (no PV console ring/evtchn is allocated for dom0less vpl011). On the debug UART press `Ctrl-A` three times to cycle input to `DOM1` (`raspberrypi5-domd login:`); or read its log with `xl dmesg \| grep DOM1`. |
 | DomU (AGL) | `ssh root@192.168.10.12`; or `xl console 3` from the toolstack domain (`domu login:`) |
+| DomK (Ankaios PoC) | From DomD, use `xl console DomK` for the `hvc0` console. DomK uses `192.168.10.15`; the DomD-side `ank` CLI connects to the Ankaios server there. See [`docs/ANKAIOS-DOMK.md`](docs/ANKAIOS-DOMK.md) for the workload update demonstration |
 | DomZ (Zephyr) | **`xl console DomZ`** from the toolstack domain (DomD in the zephyr flavour, Dom0 in the linux one) — Zephyr's Xen **PV console**, which is why the `xenvm` board is used rather than a vpl011 dom0less domain. `xenconsole` needs a tty, so over ssh use `ssh -tt root@192.168.10.10 'xl console DomZ'`. No network, no display: this console is the only interface. Exit with `Ctrl-]` |
 | DomA (AAOS) | `adb connect 192.168.10.13:5555` (Android has no sshd); `adb logcat` for logcat. Serial console: **`xl console 2`** from the toolstack domain — DomA's `hvc0` is the Xen **PV console**, and AAOS init's `console` service puts a shell on it (prompt `console:/ $`, uid 2000 `shell`). `xenconsole` calls `tcsetattr()` on stdin, so it needs a tty: over ssh use `ssh -tt root@192.168.10.10 'xl console 2'`. The `virtconsole` sockets in `doma.cfg` are **inert** — see the note below. |
 
